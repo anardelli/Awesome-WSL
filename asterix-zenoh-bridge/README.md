@@ -1,155 +1,146 @@
-# Asterix ↔ Zenoh Bridge
+# asterix-zenoh-bridge
 
-Forward raw **Asterix** surveillance frames (Eurocontrol ATC data) from a UDP
-transmitter to any **Zenoh** subscriber through a local `zenohd` router.
+A Rust bridge that receives raw **ASTERIX** (Eurocontrol) frames over **UDP** or **TCP** and publishes them to a [Zenoh](https://zenoh.io/) session, making them available to `zenohd` and any downstream Zenoh subscriber.
+
+> **Linux-only scope** — this project was designed to run on Linux as per its requirements. The `SO_REUSEPORT` socket option used for multiple-instance support is conditionally compiled for Linux via `#[cfg(target_os = "linux")]`; the code would also compile on BSD/macOS, but those platforms are not tested or supported.
+
+---
+
+## Architecture
 
 ```
-[Asterix transmitter (UDP/multicast)]
-          │
-          ▼
-  asterix_zenoh_bridge.py          ← this bridge
-          │
-          ▼
-       zenohd                      ← router (zenohd_config.json5)
-          │
-          ▼
-  asterix_subscriber.py            ← example consumer
+[ASTERIX Transmitter]
+        │  UDP datagram / TCP stream (binary RAW)
+        ▼
+[asterix-zenoh-bridge]  ← this binary (tokio async, Rust)
+        │  zenoh::put(key_expr, raw_bytes)
+        ▼
+[zenohd]  ← Zenoh router / broker
+        │
+        ├─► [Subscriber A]  ← ASTERIX decoder
+        ├─► [Subscriber B]  ← storage / logging
+        └─► [Subscriber C]  ← display / alerting
 ```
 
 ---
 
-## Requirements
+## Prerequisites
 
-| Requirement | Notes |
-|-------------|-------|
-| Python 3.9+ | Available in all modern WSL2 distributions |
-| `zenohd`    | Zenoh router binary ([releases](https://github.com/eclipse-zenoh/zenoh/releases)) |
-| pip packages | See `requirements.txt` |
+- Rust 1.75+ (`rustup update stable`)
+- Linux (tested on Ubuntu 22.04 / Debian 12)
+- A running `zenohd` instance (optional — the bridge can operate as a peer without one)
 
 ---
 
-## Quick start
-
-### 1 – Install Python dependencies
+## Build
 
 ```bash
-pip install -r requirements.txt
+cd asterix-zenoh-bridge
+cargo build --release
 ```
 
-### 2 – Start the Zenoh router
-
-Download the `zenohd` binary for your platform (Linux x86-64 / ARM64):
-
-```bash
-# Example – replace VERSION with the latest release tag
-VERSION=1.0.0
-wget https://github.com/eclipse-zenoh/zenoh/releases/download/${VERSION}/zenoh-${VERSION}-x86_64-unknown-linux-gnu.zip
-unzip zenoh-${VERSION}-x86_64-unknown-linux-gnu.zip
-./zenohd --config zenohd_config.json5
-```
-
-### 3 – Start the bridge
-
-**Unicast (single source):**
-
-```bash
-python3 asterix_zenoh_bridge.py \
-    --udp-host 0.0.0.0 \
-    --udp-port 8600 \
-    --zenoh-key asterix/raw
-```
-
-**Multicast group:**
-
-```bash
-python3 asterix_zenoh_bridge.py \
-    --udp-port 8600 \
-    --multicast-group 239.255.0.1 \
-    --zenoh-key asterix/raw
-```
-
-### 4 – Start a subscriber (validation)
-
-```bash
-python3 asterix_subscriber.py --zenoh-key asterix/raw
-```
-
-If the `asterix` Python package is installed, each frame is decoded and printed.
-Otherwise, a hex preview is shown.
+Binaries are produced at:
+- `target/release/asterix-zenoh-bridge`
+- `target/release/asterix-sub`
 
 ---
 
-## Bridge options
+## Usage
+
+### Bridge (publisher)
 
 ```
-$ python3 asterix_zenoh_bridge.py --help
+USAGE:
+    asterix-zenoh-bridge [OPTIONS]
 
-optional arguments:
-  --udp-host IP         Local IP address to bind to.        [0.0.0.0]
-  --udp-port PORT       UDP port to listen on.              [8600]
-  --multicast-group IP  Multicast group IP to join.         [disabled]
-  --multicast-iface IP  Local interface for multicast.      [default]
-  --buf-size BYTES      UDP receive buffer size.            [65535]
-  --zenoh-key KEY       Zenoh key expression.               [asterix/raw]
-  --zenoh-connect LOC   Zenoh locator (e.g. tcp/127.0.0.1:7447). [auto]
-  -v, --verbose         Per-frame debug output.
+OPTIONS:
+    -l, --listen-addr <ADDR>        Address to listen on [default: 0.0.0.0:30192]
+    -p, --protocol <PROTO>          Transport: udp | tcp [default: udp]
+    -m, --multicast-group <IP>      Multicast group to join (UDP only, e.g. 239.255.0.1)
+    -z, --zenoh-endpoint <EP>       Zenoh router endpoint (e.g. tcp/127.0.0.1:7447)
+    -k, --key-expr <KEY>            Zenoh key expression [default: asterix/raw]
+    -d, --decode                    Print CAT / SAC / SIC for each frame
+    -h, --help                      Print help
+    -V, --version                   Print version
+```
+
+#### Examples
+
+**UDP unicast, connect to a local zenohd:**
+```bash
+./asterix-zenoh-bridge \
+  --listen-addr 0.0.0.0:30192 \
+  --protocol udp \
+  --zenoh-endpoint tcp/127.0.0.1:7447 \
+  --key-expr asterix/raw
+```
+
+**UDP multicast (group 239.255.0.1):**
+```bash
+./asterix-zenoh-bridge \
+  --listen-addr 0.0.0.0:30192 \
+  --protocol udp \
+  --multicast-group 239.255.0.1 \
+  --zenoh-endpoint tcp/127.0.0.1:7447 \
+  --key-expr asterix/radar/cat048
+```
+
+**TCP stream receiver:**
+```bash
+./asterix-zenoh-bridge \
+  --listen-addr 0.0.0.0:30192 \
+  --protocol tcp \
+  --zenoh-endpoint tcp/127.0.0.1:7447 \
+  --decode
+```
+
+**Peer mode (no zenohd):**
+```bash
+./asterix-zenoh-bridge --listen-addr 0.0.0.0:30192
+```
+
+Enable verbose logging:
+```bash
+RUST_LOG=debug ./asterix-zenoh-bridge ...
 ```
 
 ---
 
-## WSL2 network notes
+### Subscriber (validation tool)
 
-WSL2 uses a virtual network interface and does **not** receive Windows-side
-multicast traffic by default.  Two workarounds:
+`asterix-sub` subscribes to a key expression and prints every received frame:
 
-### Option A – socat relay (Windows → WSL2)
+```bash
+./asterix-sub --key-expr "asterix/raw"
 
-Run this in a **Windows** PowerShell or CMD terminal:
-
-```powershell
-# Forward multicast traffic arriving on the Windows NIC into WSL2 UDP
-socat UDP4-RECVFROM:8600,ip-add-membership=239.255.0.1:0.0.0.0,fork \
-      UDP4-SENDTO:$(wsl hostname -I | awk '{print $1}'):8600
+# Connect to a remote zenohd
+./asterix-sub --key-expr "asterix/**" --zenoh-endpoint tcp/192.168.1.10:7447
 ```
-
-Then run the bridge in WSL2 in unicast mode (`--udp-host 0.0.0.0 --udp-port 8600`).
-
-### Option B – run everything natively on Windows
-
-Install Python for Windows, `zenohd.exe`, and run the bridge and subscriber
-directly on Windows — no WSL2 network translation needed.
-
-### Option C – WSL2 mirrored networking (Windows 11 22H2+)
-
-Enable mirrored networking in `%USERPROFILE%\.wslconfig`:
-
-```ini
-[wsl2]
-networkingMode=mirrored
-```
-
-Then multicast traffic is available inside WSL2 without any relay.
 
 ---
 
-## Zenoh key expression layout
+## ASTERIX framing
 
-| Key expression         | Content |
-|------------------------|---------|
-| `asterix/raw`          | Any Asterix category, raw bytes |
-| `asterix/raw/cat048`   | CAT 048 (Monoradar target reports) |
-| `asterix/raw/cat062`   | CAT 062 (SDPS track messages) |
+### UDP
+One UDP datagram = one ASTERIX message.  
+Header: `CAT (1 byte) | LEN_HIGH | LEN_LOW` — total frame length in big-endian.
 
-Publish to category-specific keys by filtering the first byte of each frame
-and adjusting `--zenoh-key` accordingly, or by running one bridge instance
-per category.
+### TCP
+TCP carries a byte stream; framing is extracted by reading the 3-byte header first and then reading exactly `LEN - 3` more bytes.
 
 ---
 
-## References
+## Key expressions
 
-- [Zenoh documentation](https://zenoh.io/docs/)
-- [ASTERIX standard (Eurocontrol)](https://www.eurocontrol.int/asterix)
-- [asterix Python package](https://pypi.org/project/asterix/)
-- [CroatiaControl asterix parser (C++)](https://github.com/CroatiaControlLtd/asterix)
-- [Wireshark Asterix plugin](https://www.wireshark.org/)
+| Key expression         | Suggested use                        |
+|------------------------|--------------------------------------|
+| `asterix/raw`          | All categories, unfiltered           |
+| `asterix/raw/cat048`   | Radar target reports (CAT 048)       |
+| `asterix/raw/cat021`   | ADS-B target reports (CAT 021)       |
+| `asterix/raw/cat062`   | Tracked target reports (CAT 062)     |
+
+---
+
+## License
+
+Licensed under either of [MIT](../LICENSE) or Apache-2.0.

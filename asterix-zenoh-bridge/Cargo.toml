@@ -1,0 +1,31 @@
+[package]
+name = "asterix-zenoh-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Bridge that receives raw ASTERIX (Eurocontrol) frames over UDP/TCP and publishes them to a Zenoh session"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+rust-version = "1.75"
+
+[[bin]]
+name = "asterix-zenoh-bridge"
+path = "src/main.rs"
+
+[[bin]]
+name = "asterix-sub"
+path = "src/bin/asterix_sub.rs"
+
+[dependencies]
+zenoh = { version = "1.9.0", features = ["default"] }
+tokio = { version = "1.51.1", features = ["rt-multi-thread", "net", "io-util", "macros", "signal", "sync"] }
+bytes = "1.11.1"
+clap = { version = "4.6.0", features = ["derive"] }
+socket2 = { version = "0.6.3", features = [] }
+log = "0.4.29"
+anyhow = "1.0.102"
+env_logger = "0.11.10"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
