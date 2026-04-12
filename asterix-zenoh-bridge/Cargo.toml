@@ -5,6 +5,7 @@ edition = "2021"
 description = "Bridge that receives raw ASTERIX (Eurocontrol) frames over UDP/TCP and publishes them to a Zenoh session"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+rust-version = "1.75"
 
 [[bin]]
 name = "asterix-zenoh-bridge"

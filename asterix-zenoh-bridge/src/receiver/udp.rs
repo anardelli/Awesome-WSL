@@ -74,7 +74,8 @@ fn build_socket(
     let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
     socket.set_reuse_address(true)?;
 
-    // SO_REUSEPORT is Linux-only
+    // SO_REUSEPORT is available on Linux and BSD/macOS; conditionally compiled
+    // here because this project explicitly targets Linux per its requirements.
     #[cfg(target_os = "linux")]
     socket.set_reuse_port(true)?;
 

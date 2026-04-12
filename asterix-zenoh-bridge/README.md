@@ -2,7 +2,7 @@
 
 A Rust bridge that receives raw **ASTERIX** (Eurocontrol) frames over **UDP** or **TCP** and publishes them to a [Zenoh](https://zenoh.io/) session, making them available to `zenohd` and any downstream Zenoh subscriber.
 
-> **Linux-only** — uses `SO_REUSEPORT` and other Linux socket features via the `socket2` crate.
+> **Linux-only scope** — this project was designed to run on Linux as per its requirements. The `SO_REUSEPORT` socket option used for multiple-instance support is conditionally compiled for Linux via `#[cfg(target_os = "linux")]`; the code would also compile on BSD/macOS, but those platforms are not tested or supported.
 
 ---
 
